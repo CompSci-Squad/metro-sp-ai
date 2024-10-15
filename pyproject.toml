@@ -1,0 +1,19 @@
+[project]
+name = "metro-sp-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "opencv-python>=4.10.0.84",
+]
+
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/main"]
+
+[tool.uv.sources]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
