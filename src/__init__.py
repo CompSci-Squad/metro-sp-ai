@@ -2,8 +2,8 @@
 import base64
 import os
 import cv2
-from functions.pre_process import decode_base64
-from functions.detect_face import detect_face
+from .functions.pre_process import decode_base64
+from .functions.detect_face import detect_face
 
 # # loading the haar case algorithm file into alg variable
 # alg = "haarcascade_frontalface_default.xml"
