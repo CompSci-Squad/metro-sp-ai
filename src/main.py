@@ -1,51 +1,70 @@
-# importing the cv2 library
-import base64
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
 import os
-import cv2
-from functions.pre_process import decode_base64
-from functions.detect_face import detect_face
+import weaviate
+from weaviate.collections.classes.internal import GenerativeSearchReturnType
 
-# # loading the haar case algorithm file into alg variable
-# alg = "haarcascade_frontalface_default.xml"
-# # passing the algorithm to OpenCV
-# haar_cascade = cv2.CascadeClassifier(alg)
-# # loading the image path into file_name variable - replace <INSERT YOUR IMAGE NAME HERE> with the path to your image
-# file_name = "test-image.png"
-# # reading the image
-# img = cv2.imread(file_name, 0)
-# # creating a black and white version of the image
-# gray_img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-# # detecting the faces
-# faces = haar_cascade.detectMultiScale(
-#     gray_img, scaleFactor=1.05, minNeighbors=2, minSize=(100, 100)
-# )
+cohere_api_key = os.getenv("COHERE_API_KEY")  # Best practice: store your API keys in environment variables
 
-# i = 0
-# # for each face detected
-# for x, y, w, h in faces:
-#     # crop the image to select only the face
-#     cropped_image = img[y : y + h, x : x + w]
-#     # loading the target image path into target_file_name variable  - replace <INSERT YOUR TARGET IMAGE NAME HERE> with the path to your target image
-#     target_file_name = 'stored-faces/' + str(i) + '.jpg'
-#     cv2.imwrite(
-#         target_file_name,
-#         cropped_image,
-#     )
-#     i = i + 1
-
-def main():
-    image_path = os.path.join(os.path.dirname(__file__), '../images/image_test1.jpeg')
-    # Read the image using OpenCV
-    image = cv2.imread(image_path)
-
-    #   Encode the image as a JPEG (or PNG) byte array
-    _, buffer = cv2.imencode('.jpg', image)
-
-    # Convert the byte array to base64
-    encoded_image = base64.b64encode(buffer).decode('utf-8')
-    print(detect_face(decode_base64(encoded_image)))
-    
+# Initialize the Weaviate client
+async_client = weaviate.use_async_with_local(
+    headers={
+        "X-Cohere-Api-Key": cohere_api_key  # Replace with your Cohere API key
+    }
+)
 
 
-if __name__ == '__main__':
-    main()
+@asynccontextmanager
+async def lifespan(app: FastAPI):  # See https://fastapi.tiangolo.com/advanced/events/#lifespan-function
+    # Connect the client to Weaviate
+    await async_client.connect()
+    yield
+    # Close the connection to Weaviate
+    await async_client.close()
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+@app.get("/")
+async def read_root():
+    collection = async_client.collections.get("Movie")
+    obj_count = await collection.aggregate.over_all(total_count=True)
+    return {"object_count": obj_count.total_count}
+
+
+@app.get("/search")
+async def search(query: str) -> dict:
+    if not await async_client.is_ready():
+        raise HTTPException(status_code=503, detail="Weaviate is not ready")
+
+    collection = async_client.collections.get("Movie")
+    print(query)
+    response: GenerativeSearchReturnType = await collection.generate.hybrid(
+        query=query,
+        target_vector="overview_vector",
+        single_prompt=f"""
+        The user searched for query: {query}.
+        Based on the following overview, simply recommend or not whether the
+        user might want to watch the movie. Do not offer any follow-ups or additional info.
+        MOVIE TITLE: {{title}}. OVERVIEW: {{overview}}
+        """,
+        limit=3,
+    )
+
+    return {
+        "responses": [
+            {
+                "title": object.properties["title"],
+                "overview": object.properties["overview"],
+                "recommendation": object.generated,
+            }
+            for object in response.objects
+        ]
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(app, host="0.0.0.0", port=8000)
