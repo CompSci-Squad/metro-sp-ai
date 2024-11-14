@@ -1,94 +1,42 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException
-import os
-import weaviate
-import weaviate.classes as wvc
-from weaviate.collections.classes.internal import GenerativeSearchReturnType
+from fastapi import FastAPI
+import asyncio
+import signal
+from database.client import client
+from database.schema import generate_schema
+from health import health_router
+from config import Settings
 
-# cohere_api_key = os.getenv("COHERE_API_KEY")  # Best practice: store your API keys in environment variables
-
-# # Initialize the Weaviate client
-# async_client = weaviate.use_async_with_local(
-#     headers={
-#         "X-Cohere-Api-Key": cohere_api_key  # Replace with your Cohere API key
-#     }
-# )
-
-
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):  # See https://fastapi.tiangolo.com/advanced/events/#lifespan-function
-#     # Connect the client to Weaviate
-#     await async_client.connect()
-#     yield
-#     # Close the connection to Weaviate
-#     await async_client.close()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await client.connect()
+    await generate_schema()
+    yield
+    await client.close()
 
 
-# app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan)
+
+app.include_router(health_router)
+
+def main():
+    config = Settings()
+    print(config.model_dump_json())
+    loop = asyncio.get_event_loop()
+    stop_event = asyncio.Event()
 
 
-# @app.get("/")
-# async def read_root():
-#     collection = async_client.collections.get("Movie")
-#     obj_count = await collection.aggregate.over_all(total_count=True)
-#     return {"object_count": obj_count.total_count}
+    loop.add_signal_handler(signal.SIGINT, stop_event.set)
 
+    import uvicorn
+    config = uvicorn.Config(app, host="0.0.0.0", port=config.port, loop="asyncio")
+    server = uvicorn.Server(config)
 
-# @app.get("/search")
-# async def search(query: str) -> dict:
-#     if not await async_client.is_ready():
-#         raise HTTPException(status_code=503, detail="Weaviate is not ready")
+    try:
+        loop.run_until_complete(asyncio.gather(server.serve(), stop_event.wait()))
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
 
-#     collection = async_client.collections.get("Movie")
-#     print(query)
-#     response: GenerativeSearchReturnType = await collection.generate.hybrid(
-#         query=query,
-#         target_vector="overview_vector",
-#         single_prompt=f"""
-#         The user searched for query: {query}.
-#         Based on the following overview, simply recommend or not whether the
-#         user might want to watch the movie. Do not offer any follow-ups or additional info.
-#         MOVIE TITLE: {{title}}. OVERVIEW: {{overview}}
-#         """,
-#         limit=3,
-#     )
-
-#     return {
-#         "responses": [
-#             {
-#                 "title": object.properties["title"],
-#                 "overview": object.properties["overview"],
-#                 "recommendation": object.generated,
-#             }
-#             for object in response.objects
-#         ]
-#     }
-
-
-# if __name__ == "__main__":
-#     import uvicorn
-
-#     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-client = weaviate.connect_to_local()
-
-try:
-    test = client.collections.create(
-        name="Images",
-        vectorizer_config=wvc.config.Configure.Vectorizer.img2vec_neural(["image"]),
-        vector_index_config=wvc.config.Configure.VectorIndex.hnsw(),
-        properties=[
-            wvc.config.Property(
-                name="cpf",
-                data_type=wvc.config.DataType.TEXT,
-            ),
-            wvc.config.Property(
-                name="image",
-                data_type=wvc.config.DataType.BLOB,
-            ),
-        ]
-    )
-
-finally:
-    print(client.collections.list_all())
-    client.close()
+if __name__ == "__main__":
+    main()
