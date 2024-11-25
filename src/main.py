@@ -2,10 +2,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import asyncio
 import signal
-from database.client import client
-from database.schema import generate_schema
-from health import health_router
-from config import Settings
+from .database.client import client
+from .database.schema import generate_schema
+from .health import health_router
+from .search import search_router
+from .image import image_router
+from .config import Settings
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,6 +20,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 app.include_router(health_router)
+app.include_router(search_router)
+app.include_router(image_router)
 
 def main():
     config = Settings()

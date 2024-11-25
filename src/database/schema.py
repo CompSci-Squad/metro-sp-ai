@@ -1,5 +1,6 @@
 import logging
 import weaviate.classes as wvc
+from weaviate.classes.config import Configure
 from .client import client
 
 # Set up the logger
@@ -11,12 +12,16 @@ async def generate_schema() -> None:
     
     if any(collection == "Images" for collection in existing_collections):
         logger.info("Schema for 'Images' already exists.")
-        return 
+        return
+        
 
     await client.collections.create(
         name="Images",
-        vectorizer_config=wvc.config.Configure.Vectorizer.img2vec_neural(["image"]),
-        vector_index_config=wvc.config.Configure.VectorIndex.hnsw(),
+         vectorizer_config=wvc.config.Configure.Vectorizer.multi2vec_clip(
+            image_fields=[
+                'image'
+            ],
+        ),
         properties=[
             wvc.config.Property(
                 name="cpf",
