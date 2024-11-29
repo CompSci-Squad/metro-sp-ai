@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    port: int = 8080
+    PORT: int
+    HOST: str
 
     model_config = SettingsConfigDict(env_file=".env")
